@@ -1,11 +1,39 @@
+from flask import Flask, jsonify, request, abort
+from flask_cors import CORS
+import sqlite3
+import datetime
+import ipinfo
+import psutil
 import nmap
+from scapy.all import IP, ICMP, sr1, conf # Importamos Scapy
 
-# ... [código anterior de imports, IPINFO_TOKEN, handler, init_db, log_ip, get_logged_ips_from_db] ...
+app = Flask(__name__)
+CORS(app)
 
-# ... [código anterior de init_db, log_ip, get_logged_ips_from_db] ...
+IPINFO_TOKEN = "<2ee7b937864c94>"
+handler = ipinfo.getHandler(IPINFO_TOKEN)
+DB_PATH = 'senturion_logs.db'
+
+# --- Funciones de Base de Datos ---
+def init_db():
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute('''CREATE TABLE IF NOT EXISTS ips
+                 (ip text primary key, location text, city text, timestamp text, blocked integer default 0)''')
+    conn.commit()
+    conn.close()
+
+def log_ip(ip_address, location, city):
+    # ... [código anterior de log_ip, sin cambios] ...
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute("INSERT OR REPLACE INTO ips VALUES (?, ?, ?, ?, COALESCE((SELECT blocked FROM ips WHERE ip = ?), 0))", 
+              (ip_address, location, city, datetime.datetime.now().isoformat(), ip_address))
+    conn.commit()
+    conn.close()
 
 def get_logged_ips_from_db():
-    # ... [función anterior, no necesita cambios] ...
+    # ... [código anterior de get_logged_ips_from_db, sin cambios] ...
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
     c.execute("SELECT ip, location, city, blocked FROM ips")
@@ -17,13 +45,28 @@ def get_logged_ips_from_db():
         logged_ips.append({"ip": ip, "location": location, "city": city, "blocked": blocked})
     return logged_ips
 
-# NUEVA RUTA COMPLEJA: Escaneo de puertos del servidor
+# --- Funciones de Control y Escaneo ---
+
+@app.route('/api/block_ip', methods=['POST'])
+def block_ip():
+    # ... [código anterior de block_ip, sin cambios] ...
+    data = request.get_json()
+    ip_to_block = data.get('ip')
+    if not ip_to_block:
+        abort(400, description="IP required")
+
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute("UPDATE ips SET blocked = 1 WHERE ip = ?", (ip_to_block,))
+    conn.commit()
+    conn.close()
+    return jsonify({"status": "blocked", "ip": ip_to_block})
+
+# NUEVA RUTA: Escaneo de Puertos del Servidor (Usando Nmap)
 @app.route('/api/scan_ports', methods=['GET'])
 def scan_ports():
     nm = nmap.PortScanner()
-    # Escanea puertos TCP comunes en el localhost (127.0.0.1)
     nm.scan('127.0.0.1', '20-100') 
-    
     open_ports = []
     for host in nm.all_hosts():
         for proto in nm[host].all_protocols():
@@ -31,16 +74,25 @@ def scan_ports():
             for port in lport:
                 if nm[host][proto][port]['state'] == 'open':
                     open_ports.append({"port": port, "service": nm[host][proto][port]['name']})
-                    
     return jsonify({"status": "scan_complete", "open_ports": open_ports, "target": "localhost"})
 
-# ... [código anterior de block_ip y get_status] ...
+# NUEVA RUTA SOFISTICADA: Ping de Reconocimiento (Usando Scapy)
+@app.route('/api/ping_recon/<ip>', methods=['GET'])
+def ping_recon(ip):
+    # Esto envia un paquete ICMP (ping) para ver si la IP está viva.
+    # Es un metodo basico de reconocimiento profesional.
+    conf.verb = 0 # No mostrar salida en consola
+    packet = IP(dst=ip)/ICMP()
+    resp, unans = sr1(packet, timeout=2) # Envia y espera respuesta
+    if resp:
+        return jsonify({"ip": ip, "status": "vivo", "summary": resp.summary()})
+    else:
+        return jsonify({"ip": ip, "status": "muerto", "summary": "No hay respuesta ICMP"})
 
-# ... [código anterior de block_ip y get_status] ...
 
 @app.route('/api/status', methods=['GET'])
 def get_status():
-    # ... [código anterior para checkear bloqueo, logear IP y obtener logged_ips_list] ...
+    # ... [código anterior de get_status, sin cambios en la parte de IP blocking] ...
     ip_address = request.headers.get('X-Forwarded-For', request.remote_addr).split(',').strip()
 
     conn = sqlite3.connect(DB_PATH)
@@ -48,7 +100,7 @@ def get_status():
     c.execute("SELECT blocked FROM ips WHERE ip = ?", (ip_address,))
     result = c.fetchone()
     conn.close()
-    if result and result[0] == 1:
+    if result and result == 1:
         abort(403, description="Access Blocked by Senturion System") 
 
     location, city = "0,0", "Desconocida"
@@ -66,21 +118,17 @@ def get_status():
     return jsonify({
         "threats_blocked": 2847,
         "active_connections": conexiones_activas,
-        "pending_alerts": len(open_ports) if 'open_ports' in globals() else 1 if conexiones_activas > 1 else 0, # Ahora usa los puertos abiertos
+        "pending_alerts": 0 if not logged_ips_list else sum(1 for ip in logged_ips_list if ip['blocked']),
         "system_status": f"VIGILANCIA ACTIVA ({conexiones_activas} nodos)",
         "server_location": "4.7110,-74.0721",
         "logged_ips": logged_ips_list,
         "logs": [
-            f"[{datetime.datetime.now().strftime('%H:%M:%S')}] {conexiones_activas} IPs rastreadas.",
+            f"[{datetime.datetime.now().strftime('%H:%M:%S')}] {conexiones_activas} IPs rastreadas. Alertas Pendientes: {sum(1 for ip in logged_ips_list if ip['blocked'])}",
             f"[{datetime.datetime.now().strftime('%H:%M:%S')}] Última conexión: {city}.",
-            f"[{datetime.datetime.now().strftime('%H:%M:%S')}] Alertas pendientes: {len(open_ports) if 'open_ports' in globals() else 'N/A'} puertos abiertos detectados."
         ]
     })
 
 if __name__ == '__main__':
     init_db()
-    # Ejecutamos el primer escaneo al iniciar el servidor
-    # Esto puede ser lento y bloquear el inicio, mejor hacerlo bajo demanda via /api/scan_ports
-    # scan_ports() 
     app.run(host='0.0.0.0', port=5000)
 
