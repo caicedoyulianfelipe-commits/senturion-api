@@ -1,39 +1,13 @@
-from flask import Flask, jsonify, request, abort
-from flask_cors import CORS
-import sqlite3
-import datetime
-import ipinfo
-import psutil
+import nmap
 
-app = Flask(__name__)
-CORS(app)
+# ... [código anterior de imports, IPINFO_TOKEN, handler, init_db, log_ip, get_logged_ips_from_db] ...
 
-IPINFO_TOKEN = "2ee7b937864c94"
-handler = ipinfo.getHandler(IPINFO_TOKEN)
-DB_PATH = 'senturion_logs.db'
-
-def init_db():
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    # Añadimos la columna 'blocked' con valor por defecto 0 (no bloqueada)
-    c.execute('''CREATE TABLE IF NOT EXISTS ips
-                 (ip text primary key, location text, city text, timestamp text, blocked integer default 0)''')
-    conn.commit()
-    conn.close()
-
-def log_ip(ip_address, location, city):
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    # Mantenemos el estado de bloqueo si ya estaba bloqueada
-    c.execute("INSERT OR REPLACE INTO ips VALUES (?, ?, ?, ?, COALESCE((SELECT blocked FROM ips WHERE ip = ?), 0))", 
-              (ip_address, location, city, datetime.datetime.now().isoformat(), ip_address))
-    conn.commit()
-    conn.close()
+# ... [código anterior de init_db, log_ip, get_logged_ips_from_db] ...
 
 def get_logged_ips_from_db():
+    # ... [función anterior, no necesita cambios] ...
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
-    # Obtenemos el estado de bloqueo también
     c.execute("SELECT ip, location, city, blocked FROM ips")
     ips_data = c.fetchall()
     conn.close()
@@ -43,34 +17,39 @@ def get_logged_ips_from_db():
         logged_ips.append({"ip": ip, "location": location, "city": city, "blocked": blocked})
     return logged_ips
 
-# NUEVA RUTA: Recibe la orden de bloqueo del dashboard
-@app.route('/api/block_ip', methods=['POST'])
-def block_ip():
-    data = request.get_json()
-    ip_to_block = data.get('ip')
-    if not ip_to_block:
-        abort(400, description="IP required") # Error si no hay IP
+# NUEVA RUTA COMPLEJA: Escaneo de puertos del servidor
+@app.route('/api/scan_ports', methods=['GET'])
+def scan_ports():
+    nm = nmap.PortScanner()
+    # Escanea puertos TCP comunes en el localhost (127.0.0.1)
+    nm.scan('127.0.0.1', '20-100') 
+    
+    open_ports = []
+    for host in nm.all_hosts():
+        for proto in nm[host].all_protocols():
+            lport = nm[host][proto].keys()
+            for port in lport:
+                if nm[host][proto][port]['state'] == 'open':
+                    open_ports.append({"port": port, "service": nm[host][proto][port]['name']})
+                    
+    return jsonify({"status": "scan_complete", "open_ports": open_ports, "target": "localhost"})
 
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    c.execute("UPDATE ips SET blocked = 1 WHERE ip = ?", (ip_to_block,))
-    conn.commit()
-    conn.close()
-    return jsonify({"status": "blocked", "ip": ip_to_block})
+# ... [código anterior de block_ip y get_status] ...
 
+# ... [código anterior de block_ip y get_status] ...
 
 @app.route('/api/status', methods=['GET'])
 def get_status():
-    ip_address = request.headers.get('X-Forwarded-For', request.remote_addr).split(',')[0].strip()
+    # ... [código anterior para checkear bloqueo, logear IP y obtener logged_ips_list] ...
+    ip_address = request.headers.get('X-Forwarded-For', request.remote_addr).split(',').strip()
 
-    # VERIFICACIÓN DE ÉLITE: Si la IP está bloqueada, abortar (Error 403 Prohibido)
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
     c.execute("SELECT blocked FROM ips WHERE ip = ?", (ip_address,))
     result = c.fetchone()
     conn.close()
     if result and result[0] == 1:
-        abort(403, description="Access Blocked by Senturion System") # La respuesta de élite
+        abort(403, description="Access Blocked by Senturion System") 
 
     location, city = "0,0", "Desconocida"
     try:
@@ -87,16 +66,21 @@ def get_status():
     return jsonify({
         "threats_blocked": 2847,
         "active_connections": conexiones_activas,
-        "pending_alerts": 1 if conexiones_activas > 1 else 0,
+        "pending_alerts": len(open_ports) if 'open_ports' in globals() else 1 if conexiones_activas > 1 else 0, # Ahora usa los puertos abiertos
         "system_status": f"VIGILANCIA ACTIVA ({conexiones_activas} nodos)",
         "server_location": "4.7110,-74.0721",
         "logged_ips": logged_ips_list,
         "logs": [
             f"[{datetime.datetime.now().strftime('%H:%M:%S')}] {conexiones_activas} IPs rastreadas.",
-            f"[{datetime.datetime.now().strftime('%H:%M:%S')}] Última conexión: {city}",
+            f"[{datetime.datetime.now().strftime('%H:%M:%S')}] Última conexión: {city}.",
+            f"[{datetime.datetime.now().strftime('%H:%M:%S')}] Alertas pendientes: {len(open_ports) if 'open_ports' in globals() else 'N/A'} puertos abiertos detectados."
         ]
     })
 
 if __name__ == '__main__':
     init_db()
+    # Ejecutamos el primer escaneo al iniciar el servidor
+    # Esto puede ser lento y bloquear el inicio, mejor hacerlo bajo demanda via /api/scan_ports
+    # scan_ports() 
     app.run(host='0.0.0.0', port=5000)
+
