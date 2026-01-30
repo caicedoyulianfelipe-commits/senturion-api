@@ -5,12 +5,12 @@ import datetime
 import ipinfo
 import psutil
 import nmap
-from scapy.all import IP, ICMP, sr1, conf # Importamos Scapy
+from scapy.all import IP, ICMP, sr1, conf 
 
 app = Flask(__name__)
 CORS(app)
 
-IPINFO_TOKEN = "<2ee7b937864c94>"
+IPINFO_TOKEN = "2ee7b937864c94"
 handler = ipinfo.getHandler(IPINFO_TOKEN)
 DB_PATH = 'senturion_logs.db'
 
@@ -24,7 +24,6 @@ def init_db():
     conn.close()
 
 def log_ip(ip_address, location, city):
-    # ... [código anterior de log_ip, sin cambios] ...
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
     c.execute("INSERT OR REPLACE INTO ips VALUES (?, ?, ?, ?, COALESCE((SELECT blocked FROM ips WHERE ip = ?), 0))", 
@@ -33,7 +32,6 @@ def log_ip(ip_address, location, city):
     conn.close()
 
 def get_logged_ips_from_db():
-    # ... [código anterior de get_logged_ips_from_db, sin cambios] ...
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
     c.execute("SELECT ip, location, city, blocked FROM ips")
@@ -49,7 +47,6 @@ def get_logged_ips_from_db():
 
 @app.route('/api/block_ip', methods=['POST'])
 def block_ip():
-    # ... [código anterior de block_ip, sin cambios] ...
     data = request.get_json()
     ip_to_block = data.get('ip')
     if not ip_to_block:
@@ -79,20 +76,16 @@ def scan_ports():
 # NUEVA RUTA SOFISTICADA: Ping de Reconocimiento (Usando Scapy)
 @app.route('/api/ping_recon/<ip>', methods=['GET'])
 def ping_recon(ip):
-    # Esto envia un paquete ICMP (ping) para ver si la IP está viva.
-    # Es un metodo basico de reconocimiento profesional.
-    conf.verb = 0 # No mostrar salida en consola
+    conf.verb = 0 
     packet = IP(dst=ip)/ICMP()
-    resp, unans = sr1(packet, timeout=2) # Envia y espera respuesta
+    resp, unans = sr1(packet, timeout=2) 
     if resp:
         return jsonify({"ip": ip, "status": "vivo", "summary": resp.summary()})
     else:
         return jsonify({"ip": ip, "status": "muerto", "summary": "No hay respuesta ICMP"})
 
-
 @app.route('/api/status', methods=['GET'])
 def get_status():
-    # ... [código anterior de get_status, sin cambios en la parte de IP blocking] ...
     ip_address = request.headers.get('X-Forwarded-For', request.remote_addr).split(',').strip()
 
     conn = sqlite3.connect(DB_PATH)
@@ -131,4 +124,3 @@ def get_status():
 if __name__ == '__main__':
     init_db()
     app.run(host='0.0.0.0', port=5000)
-
