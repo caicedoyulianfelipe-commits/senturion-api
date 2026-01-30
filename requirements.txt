@@ -5,3 +5,8 @@ flask
 flask-cors
 psutil
 ipinfo
+flask
+flask-cors
+psutil
+ipinfo
+python-nmap
