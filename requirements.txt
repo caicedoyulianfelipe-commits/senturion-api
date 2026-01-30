@@ -1,3 +1,7 @@
 flask
 flask-cors
 psutil
+flask
+flask-cors
+psutil
+ipinfo
