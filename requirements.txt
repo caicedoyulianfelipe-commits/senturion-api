@@ -16,3 +16,9 @@ psutil
 ipinfo
 python-nmap
 scapy
+flask
+flask-cors
+psutil
+ipinfo
+python-nmap
+scapy
