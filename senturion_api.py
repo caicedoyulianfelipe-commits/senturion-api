@@ -87,14 +87,18 @@ def ping_recon(ip):
 @app.route('/api/status', methods=['GET'])
 def get_status():
     # LA LÍNEA CORREGIDA: Toma la primera IP y le quita los espacios
-    ip_address = request.headers.get('X-Forwarded-For', request.remote_addr).split(',')[0].strip()
+    proxy_data = request.headers.get('X-Forwarded-For', request.remote_addr)
+    if isinstance(proxy_data, list):
+        ip_address = proxy_data[0].strip()
+    else:
+        ip_address = proxy_data.strip()
 
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
     c.execute("SELECT blocked FROM ips WHERE ip = ?", (ip_address,))
     result = c.fetchone()
     conn.close()
-    if result and result[0] == 1: # Se corrigió el acceso a la tupla
+    if result and result[0] == 1:
         abort(403, description="Access Blocked by Senturion System") 
 
     location, city = "0,0", "Desconocida"
