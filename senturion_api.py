@@ -86,12 +86,15 @@ def ping_recon(ip):
 
 @app.route('/api/status', methods=['GET'])
 def get_status():
-    # LA LÍNEA CORREGIDA: Toma la primera IP y le quita los espacios
-    proxy_data = request.headers.get('X-Forwarded-For', request.remote_addr)
-    if isinstance(proxy_data, list):
-        ip_address = proxy_data[0].strip()
-    else:
-        ip_address = proxy_data.strip()
+    # LA LÍNEA CORREGIDA DEFINITIVA: 
+    # Asegura que siempre trabajemos con un string simple.
+    ip_address = request.headers.get('X-Forwarded-For', request.remote_addr)
+    if isinstance(ip_address, list):
+        ip_address = ip_address[0]
+    if ',' in ip_address:
+        ip_address = ip_address.split(',')[0]
+    ip_address = ip_address.strip()
+
 
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
@@ -129,4 +132,3 @@ def get_status():
 if __name__ == '__main__':
     init_db()
     app.run(host='0.0.0.0', port=5000)
-
