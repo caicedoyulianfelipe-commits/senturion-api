@@ -63,12 +63,12 @@ def block_ip():
 def extract_ip_from_request(req):
     """Función a prueba de fallos para extraer la IP real."""
     if req.headers.getlist("X-Forwarded-For"):
-        client_ip = req.headers.getlist("X-Forwarded-For")
-        if isinstance(client_ip, list):
-             client_ip = client_ip[0] # Toma la primera IP de la lista
-        return client_ip.strip()
+        # Toma el primer elemento, que es la IP real del cliente
+        client_ip = req.headers.getlist("X-Forwarded-For")[0] 
     else:
-        return req.remote_addr.strip()
+        client_ip = req.remote_addr
+    # Asegura que no tenga espacios
+    return client_ip.strip()
 
 @app.route('/api/status', methods=['GET'])
 def get_status():
@@ -80,7 +80,7 @@ def get_status():
     c.execute("SELECT blocked FROM ips WHERE ip = ?", (ip_address,))
     result = c.fetchone()
     conn.close()
-    if result and result[0] == 1: # Corregimos el acceso a la tupla
+    if result and result == 1: 
         abort(403, description="Access Blocked by Senturion System") 
 
     location, city = "0,0", "Desconocida"
@@ -111,4 +111,3 @@ def get_status():
 if __name__ == '__main__':
     init_db()
     app.run(host='0.0.0.0', port=5000)
-
