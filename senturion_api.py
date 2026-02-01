@@ -4,8 +4,7 @@ import sqlite3
 import datetime
 import ipinfo
 import psutil
-import nmap
-from scapy.all import IP, ICMP, sr1, conf 
+# Eliminamos los imports de nmap y scapy que fallaban
 
 app = Flask(__name__)
 CORS(app)
@@ -43,7 +42,7 @@ def get_logged_ips_from_db():
         logged_ips.append({"ip": ip, "location": location, "city": city, "blocked": blocked})
     return logged_ips
 
-# --- Funciones de Control y Escaneo ---
+# --- Funciones de Control de IP ---
 
 @app.route('/api/block_ip', methods=['POST'])
 def block_ip():
@@ -59,41 +58,17 @@ def block_ip():
     conn.close()
     return jsonify({"status": "blocked", "ip": ip_to_block})
 
-# NUEVA RUTA: Escaneo de Puertos del Servidor (Usando Nmap)
-@app.route('/api/scan_ports', methods=['GET'])
-def scan_ports():
-    nm = nmap.PortScanner()
-    nm.scan('127.0.0.1', '20-100') 
-    open_ports = []
-    for host in nm.all_hosts():
-        for proto in nm[host].all_protocols():
-            lport = nm[host][proto].keys()
-            for port in lport:
-                if nm[host][proto][port]['state'] == 'open':
-                    open_ports.append({"port": port, "service": nm[host][proto][port]['name']})
-    return jsonify({"status": "scan_complete", "open_ports": open_ports, "target": "localhost"})
-
-# NUEVA RUTA SOFISTICADA: Ping de Reconocimiento (Usando Scapy)
-@app.route('/api/ping_recon/<ip>', methods=['GET'])
-def ping_recon(ip):
-    conf.verb = 0 
-    packet = IP(dst=ip)/ICMP()
-    resp, unans = sr1(packet, timeout=2) 
-    if resp:
-        return jsonify({"ip": ip, "status": "vivo", "summary": resp.summary()})
-    else:
-        return jsonify({"ip": ip, "status": "muerto", "summary": "No hay respuesta ICMP"})
+# Eliminamos las rutas /api/scan_ports y /api/ping_recon que usaban nmap/scapy
 
 def extract_ip_from_request(req):
     """Función a prueba de fallos para extraer la IP real."""
     if req.headers.getlist("X-Forwarded-For"):
-        # Toma la primera IP de la lista si hay varias
-        client_ip = req.headers.getlist("X-Forwarded-For")[0]
+        client_ip = req.headers.getlist("X-Forwarded-For")
+        if isinstance(client_ip, list):
+             client_ip = client_ip[0] # Toma la primera IP de la lista
+        return client_ip.strip()
     else:
-        client_ip = req.remote_addr
-    # Asegura que no tenga espacios
-    return client_ip.strip()
-
+        return req.remote_addr.strip()
 
 @app.route('/api/status', methods=['GET'])
 def get_status():
@@ -105,7 +80,7 @@ def get_status():
     c.execute("SELECT blocked FROM ips WHERE ip = ?", (ip_address,))
     result = c.fetchone()
     conn.close()
-    if result and result == 1:
+    if result and result[0] == 1: # Corregimos el acceso a la tupla
         abort(403, description="Access Blocked by Senturion System") 
 
     location, city = "0,0", "Desconocida"
