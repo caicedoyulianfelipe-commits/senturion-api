@@ -4,7 +4,6 @@ import sqlite3
 import datetime
 import ipinfo
 import psutil
-# Eliminamos los imports de nmap y scapy que fallaban
 
 app = Flask(__name__)
 CORS(app)
@@ -13,7 +12,7 @@ IPINFO_TOKEN = "2ee7b937864c94"
 handler = ipinfo.getHandler(IPINFO_TOKEN)
 DB_PATH = 'senturion_logs.db'
 
-# --- Funciones de Base de Datos ---
+# ... [Funciones de base de datos y block_ip, sin cambios] ...
 def init_db():
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
@@ -21,7 +20,6 @@ def init_db():
                  (ip text primary key, location text, city text, timestamp text, blocked integer default 0)''')
     conn.commit()
     conn.close()
-
 def log_ip(ip_address, location, city):
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
@@ -29,46 +27,41 @@ def log_ip(ip_address, location, city):
               (ip_address, location, city, datetime.datetime.now().isoformat(), ip_address))
     conn.commit()
     conn.close()
-
 def get_logged_ips_from_db():
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
     c.execute("SELECT ip, location, city, blocked FROM ips")
     ips_data = c.fetchall()
     conn.close()
-    
     logged_ips = []
     for ip, location, city, blocked in ips_data:
         logged_ips.append({"ip": ip, "location": location, "city": city, "blocked": blocked})
     return logged_ips
-
-# --- Funciones de Control de IP ---
-
 @app.route('/api/block_ip', methods=['POST'])
 def block_ip():
     data = request.get_json()
     ip_to_block = data.get('ip')
     if not ip_to_block:
         abort(400, description="IP required")
-
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
     c.execute("UPDATE ips SET blocked = 1 WHERE ip = ?", (ip_to_block,))
     conn.commit()
     conn.close()
     return jsonify({"status": "blocked", "ip": ip_to_block})
-
-# Eliminamos las rutas /api/scan_ports y /api/ping_recon que usaban nmap/scapy
+# ... [Fin de funciones sin cambios] ...
 
 def extract_ip_from_request(req):
-    """Función a prueba de fallos para extraer la IP real."""
-    if req.headers.getlist("X-Forwarded-For"):
-        # Toma el primer elemento, que es la IP real del cliente
-        client_ip = req.headers.getlist("X-Forwarded-For")[0] 
+    """Función a prueba de fallos para extraer la IP real y manejar listas."""
+    # Prioriza X-Forwarded-For y maneja listas y comas correctamente
+    if "X-Forwarded-For" in req.headers:
+        # Toma el primer elemento (la IP real del cliente) y la limpia de espacios
+        ip_list = req.headers["X-Forwarded-For"].split(',')
+        client_ip = ip_list[0].strip() if ip_list else req.remote_addr.strip()
     else:
-        client_ip = req.remote_addr
-    # Asegura que no tenga espacios
-    return client_ip.strip()
+        # Si no existe el encabezado, usa la IP remota directa y la limpia
+        client_ip = req.remote_addr.strip()
+    return client_ip
 
 @app.route('/api/status', methods=['GET'])
 def get_status():
@@ -89,6 +82,7 @@ def get_status():
         location = details.loc
         city = details.city
     except Exception as e:
+        # Este print mostrará el error en tus logs de Render
         print(f"Error fetching IP info: {e}")
         
     log_ip(ip_address, location, city)
@@ -111,3 +105,4 @@ def get_status():
 if __name__ == '__main__':
     init_db()
     app.run(host='0.0.0.0', port=5000)
+
