@@ -4,15 +4,29 @@ import sqlite3
 import datetime
 import ipinfo
 import psutil
+from flask_httpauth import HTTPBasicAuth # Importamos la autenticación
 
 app = Flask(__name__)
 CORS(app)
+auth = HTTPBasicAuth() # Creamos el objeto de autenticación
 
 IPINFO_TOKEN = "2ee7b937864c94"
 handler = ipinfo.getHandler(IPINFO_TOKEN)
 DB_PATH = 'senturion_logs.db'
 
-# ... [Funciones de base de datos y block_ip, sin cambios] ...
+# --- Configuración de Usuario y Contraseña ---
+# NOTA: En un sistema real, las contraseñas deberían estar encriptadas (hashed).
+USERS = {
+    "yulian_felipe_caicedo": "CAICEDO27" 
+}
+
+@auth.verify_password
+def verify_password(username, password):
+    if username in USERS and USERS[username] == password:
+        return username # La autenticación es exitosa
+    return None # La autenticación falla
+
+# ... [Funciones de base de datos y block_ip, sin cambios, pero ahora protegidas] ...
 def init_db():
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
@@ -37,7 +51,9 @@ def get_logged_ips_from_db():
     for ip, location, city, blocked in ips_data:
         logged_ips.append({"ip": ip, "location": location, "city": city, "blocked": blocked})
     return logged_ips
+
 @app.route('/api/block_ip', methods=['POST'])
+@auth.login_required # Protegemos esta ruta con autenticación
 def block_ip():
     data = request.get_json()
     ip_to_block = data.get('ip')
@@ -49,25 +65,22 @@ def block_ip():
     conn.commit()
     conn.close()
     return jsonify({"status": "blocked", "ip": ip_to_block})
-# ... [Fin de funciones sin cambios] ...
 
+# ... [Función extract_ip_from_request sin cambios] ...
 def extract_ip_from_request(req):
-    """Función a prueba de fallos para extraer la IP real y manejar listas."""
-    # Prioriza X-Forwarded-For y maneja listas y comas correctamente
     if "X-Forwarded-For" in req.headers:
-        # Toma el primer elemento (la IP real del cliente) y la limpia de espacios
         ip_list = req.headers["X-Forwarded-For"].split(',')
         client_ip = ip_list[0].strip() if ip_list else req.remote_addr.strip()
     else:
-        # Si no existe el encabezado, usa la IP remota directa y la limpia
         client_ip = req.remote_addr.strip()
     return client_ip
 
 @app.route('/api/status', methods=['GET'])
+@auth.login_required # Protegemos esta ruta con autenticación
 def get_status():
     # USAMOS LA FUNCIÓN A PRUEBA DE FALLOS
     ip_address = extract_ip_from_request(request)
-
+    # ... [El resto de la lógica de get_status, sin cambios] ...
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
     c.execute("SELECT blocked FROM ips WHERE ip = ?", (ip_address,))
@@ -75,20 +88,16 @@ def get_status():
     conn.close()
     if result and result == 1: 
         abort(403, description="Access Blocked by Senturion System") 
-
     location, city = "0,0", "Desconocida"
     try:
         details = handler.getDetails(ip_address)
         location = details.loc
         city = details.city
     except Exception as e:
-        # Este print mostrará el error en tus logs de Render
         print(f"Error fetching IP info: {e}")
-        
     log_ip(ip_address, location, city)
     logged_ips_list = get_logged_ips_from_db()
     conexiones_activas = len(logged_ips_list)
-
     return jsonify({
         "threats_blocked": 2847,
         "active_connections": conexiones_activas,
